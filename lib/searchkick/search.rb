@@ -184,81 +184,83 @@ module Searchkick
 
       term_filters =
         proc do |field, value|
-          if value.is_a?(Array) # in query
-            {or: value.map{|v| term_filters.call(field, v) }}
-          elsif value.nil?
-            {missing: {"field" => field, existence: true, null_value: true}}
-          else
-            {term: {field => value}}
-          end
+        if value.is_a?(Array) # in query
+          {or: value.map{|v| term_filters.call(field, v) }}
+        elsif value.nil?
+          {missing: {"field" => field, existence: true, null_value: true}}
+        else
+          {term: {field => value}}
+        end
         end
 
       # where
       where_filters =
         proc do |where|
-          filters = []
-          (where || {}).each do |field, value|
-            field = :_id if field.to_s == "id"
+        filters = []
+        (where || {}).each do |field, value|
+          field = :_id if field.to_s == "id"
 
-            if field == :or
-              value.each do |or_clause|
-                filters << {or: or_clause.map{|or_statement| {and: where_filters.call(or_statement)} }}
+          if field == :or
+            value.each do |or_clause|
+              filters << {or: or_clause.map{|or_statement| {and: where_filters.call(or_statement)} }}
+            end
+          elsif field == :and
+            value.each {|or_clause| filters << { terms: or_clause }}
+          else
+            # expand ranges
+            if value.is_a?(Range)
+              value = {gte: value.first, (value.exclude_end? ? :lt : :lte) => value.last}
+            end
+
+            if value.is_a?(Hash)
+              if value[:near]
+                filters << {
+                  geo_distance: {
+                    field => value.delete(:near).map(&:to_f).reverse,
+                    distance: value.delete(:within) || "50mi"
+                  }
+                }
+              end
+
+              if value[:top_left]
+                filters << {
+                  geo_bounding_box: {
+                    field => {
+                      top_left: value.delete(:top_left).map(&:to_f).reverse,
+                      bottom_right: value.delete(:bottom_right).map(&:to_f).reverse
+                    }
+                  }
+                }
+              end
+
+              value.each do |op, op_value|
+                if op == :not # not equal
+                  filters << {not: term_filters.call(field, op_value)}
+                elsif op == :all
+                  filters << {terms: {field => op_value, execution: "and"}}
+                else
+                  range_query =
+                    case op
+                    when :gt
+                      {from: op_value, include_lower: false}
+                    when :gte
+                      {from: op_value, include_lower: true}
+                    when :lt
+                      {to: op_value, include_upper: false}
+                    when :lte
+                      {to: op_value, include_upper: true}
+                    else
+                      raise "Unknown where operator"
+                    end
+                  filters << {range: {field => range_query}}
+                end
               end
             else
-              # expand ranges
-              if value.is_a?(Range)
-                value = {gte: value.first, (value.exclude_end? ? :lt : :lte) => value.last}
-              end
-
-              if value.is_a?(Hash)
-                if value[:near]
-                  filters << {
-                    geo_distance: {
-                      field => value.delete(:near).map(&:to_f).reverse,
-                      distance: value.delete(:within) || "50mi"
-                    }
-                  }
-                end
-
-                if value[:top_left]
-                  filters << {
-                    geo_bounding_box: {
-                      field => {
-                        top_left: value.delete(:top_left).map(&:to_f).reverse,
-                        bottom_right: value.delete(:bottom_right).map(&:to_f).reverse
-                      }
-                    }
-                  }
-                end
-
-                value.each do |op, op_value|
-                  if op == :not # not equal
-                    filters << {not: term_filters.call(field, op_value)}
-                  elsif op == :all
-                    filters << {terms: {field => op_value, execution: "and"}}
-                  else
-                    range_query =
-                      case op
-                      when :gt
-                        {from: op_value, include_lower: false}
-                      when :gte
-                        {from: op_value, include_lower: true}
-                      when :lt
-                        {to: op_value, include_upper: false}
-                      when :lte
-                        {to: op_value, include_upper: true}
-                      else
-                        raise "Unknown where operator"
-                      end
-                    filters << {range: {field => range_query}}
-                  end
-                end
-              else
-                filters << term_filters.call(field, value)
-              end
+              filters << term_filters.call(field, value)
             end
           end
-          filters
+        end
+        filters
         end
 
       # filters

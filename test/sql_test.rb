@@ -39,9 +39,9 @@ class TestSql < Minitest::Unit::TestCase
     now = Time.now
     store [
       {name: "Product A", store_id: 1, in_stock: true, backordered: true, created_at: now, orders_count: 4, user_ids: [1, 2, 3]},
-      {name: "Product B", store_id: 2, in_stock: true, backordered: false, created_at: now - 1, orders_count: 3, user_ids: [1]},
+      {name: "Product B", store_id: 2, in_stock: true, backordered: false, created_at: now - 1, orders_count: 3, user_ids: [1,2]},
       {name: "Product C", store_id: 3, in_stock: false, backordered: true, created_at: now - 2, orders_count: 2},
-      {name: "Product D", store_id: 4, in_stock: false, backordered: false, created_at: now - 3, orders_count: 1},
+      {name: "Product D", store_id: 4, in_stock: false, backordered: false, created_at: now - 3, orders_count: 1, user_ids: [1, 3]},
     ]
     assert_search "product", ["Product A", "Product B"], where: {in_stock: true}
     # date
@@ -64,12 +64,19 @@ class TestSql < Minitest::Unit::TestCase
     assert_search "product", ["Product A", "Product B", "Product C"], where: {or: [[{in_stock: true}, {store_id: 3}]]}
     assert_search "product", ["Product A", "Product B", "Product C"], where: {or: [[{orders_count: [2, 4]}, {store_id: [1, 2]}]]}
     assert_search "product", ["Product A", "Product D"], where: {or: [[{orders_count: 1}, {created_at: {gte: now - 1}, backordered: true}]]}
+    # and
+    assert_search "product", ["Product A", "Product B","Product D"], where: { and: [
+      {user_ids: [1,2]}
+    ]}
+    assert_search "product", ["Product A", "Product B"], where: { and: [
+      {user_ids: [1,2]}, {user_ids: [2]}
+    ]}
     # all
-    assert_search "product", ["Product A"], where: {user_ids: {all: [1, 3]}}
+    assert_search "product", ["Product A", "Product D"], where: {user_ids: {all: [1, 3]}}
     assert_search "product", [], where: {user_ids: {all: [1, 2, 3, 4]}}
     # not / exists
-    assert_search "product", ["Product C", "Product D"], where: {user_ids: nil}
-    assert_search "product", ["Product A", "Product B"], where: {user_ids: {not: nil}}
+    assert_search "product", ["Product C"], where: {user_ids: nil}
+    assert_search "product", ["Product A", "Product B", "Product D"], where: {user_ids: {not: nil}}
     assert_search "product", ["Product A", "Product C", "Product D"], where: {user_ids: [3, nil]}
     assert_search "product", ["Product B"], where: {user_ids: {not: [3, nil]}}
   end
